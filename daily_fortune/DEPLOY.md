@@ -61,6 +61,40 @@ docker --version
 
 > ✅ 输出示例：`Docker version 24.0.7, build afdd53b`
 
+### 第2.5步：配置 Docker 镜像加速（国内服务器必做！）
+
+> ⚠️ **国内服务器拉 Docker Hub 镜像会超时或鉴权失败，必须配置国内镜像源！**
+> 如果你遇到 `i/o timeout`、`DeadlineExceeded` 或 `authorization failed` 错误，就是这个问题。
+
+```bash
+# 创建 Docker 配置目录（如果不存在）
+sudo mkdir -p /etc/docker
+
+# 写入镜像加速配置（多源备份，一个不通自动切下一个）
+sudo tee /etc/docker/daemon.json > /dev/null << 'EOF'
+{
+  "registry-mirrors": [
+    "https://docker.1ms.run",
+    "https://docker.xuanyuan.me",
+    "https://docker.m.daocloud.io"
+  ]
+}
+EOF
+
+# 重启 Docker 使配置生效
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+
+# 验证配置是否生效（看到 Registry Mirrors 里有地址就对了）
+docker info | grep -A 5 "Registry Mirrors"
+```
+
+> ✅ 输出应包含上面配置的镜像地址
+
+> 💡 本项目的 Dockerfile 已经使用了完整的阿里云镜像地址
+> （`registry.cn-hangzhou.aliyuncs.com/library/python:3.12-slim`），
+> 不依赖 Docker Hub，所以即使 daemon.json 没配也能拉取。但建议还是配上，以备其他场景使用。
+
 ### 第3步：上传项目代码到服务器
 
 在你**本地电脑**上操作（不是服务器上）：
@@ -191,6 +225,10 @@ python3 -m venv venv
 
 # 激活虚拟环境
 source venv/bin/activate
+
+# 配置 pip 使用阿里云镜像加速（国内服务器推荐）
+pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
+pip config set global.trusted-host mirrors.aliyun.com
 
 # 安装项目
 pip install -e .
