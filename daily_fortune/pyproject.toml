@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "daily-fortune-mcp"
+version = "1.0.0"
+description = "每日气运值MCP服务 - 基于传统易学简化算法计算每日气运分数"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Daily Fortune Team" },
+]
+keywords = ["mcp", "fortune", "yi-xue", "bazi", "wuxing"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "mcp[cli]>=1.6.0",
+]
+
+[project.scripts]
+daily-fortune-mcp = "daily_fortune.server:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/daily_fortune"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
