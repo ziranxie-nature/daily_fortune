@@ -14,6 +14,9 @@
 | 公网 IP | 需要有，阿里百炼需要能访问到 |
 | 本地工具 | SSH 客户端（如 Windows Terminal / PuTTY） |
 
+> 💡 **端口说明**：本服务默认使用 **8890** 端口（避免与常见的 80/443/8000 端口冲突）。
+> 容器内部仍然监听 8000，通过 Docker 映射到服务器的 8890。
+
 ---
 
 ## 方案选择
@@ -89,11 +92,7 @@ sudo systemctl restart docker
 docker info | grep -A 5 "Registry Mirrors"
 ```
 
-> ✅ 输出应包含上面配置的镜像地址
-
-> 💡 本项目的 Dockerfile 已经使用了完整的阿里云镜像地址
-> （`registry.cn-hangzhou.aliyuncs.com/library/python:3.12-slim`），
-> 不依赖 Docker Hub，所以即使 daemon.json 没配也能拉取。但建议还是配上，以备其他场景使用。
+> ✅ 输出应包含上面配置的镜像地址。
 
 ### 第3步：上传项目代码到服务器
 
@@ -117,11 +116,15 @@ scp -r daily_fortune root@<你的服务器IP>:/opt/
 ```bash
 cd /opt/daily_fortune
 
+# 先单独测试能否拉取基础镜像（确认镜像加速生效）
+sudo docker pull python:3.12-slim
+
 # 构建镜像（第一次大约需要 1-2 分钟）
 sudo docker build -t daily-fortune-mcp:latest .
 ```
 
 > ✅ 看到 `Successfully built xxxxx` 和 `Successfully tagged daily-fortune-mcp:latest` 就成功了。
+> 如果 `docker pull` 超时，说明镜像加速没配好，回到第2.5步检查。
 
 ### 第5步：启动 Docker 容器
 
@@ -129,11 +132,11 @@ sudo docker build -t daily-fortune-mcp:latest .
 # 停掉可能存在的旧容器（首次部署不需要，但以后更新时用）
 sudo docker rm -f daily-fortune-mcp 2>/dev/null
 
-# 启动容器
+# 启动容器（8890 是服务器对外端口，8000 是容器内部端口）
 sudo docker run -d \
   --name daily-fortune-mcp \
   --restart=always \
-  -p 8000:8000 \
+  -p 8890:8000 \
   daily-fortune-mcp:latest
 ```
 
@@ -141,7 +144,9 @@ sudo docker run -d \
 - `-d`：后台运行
 - `--name`：容器名称，方便后续管理
 - `--restart=always`：服务器重启后自动启动容器
-- `-p 8000:8000`：把容器内的 8000 端口映射到服务器的 8000 端口
+- `-p 8890:8000`：把容器内的 8000 端口映射到服务器的 **8890** 端口
+
+> ⚠️ **如果 8890 也被占用了**，报错 `address already in use`，可以换成其他端口，比如 `-p 9000:8000`，把下面的 8890 都替换成 9000 即可。
 
 ### 第6步：验证服务是否正常
 
@@ -153,14 +158,14 @@ sudo docker ps
 sudo docker logs daily-fortune-mcp
 
 # 用 curl 测试 SSE 端点
-curl -N http://localhost:8000/sse
+curl -N http://localhost:8890/sse
 ```
 
 > ✅ 如果 `docker ps` 显示容器状态为 `Up`，并且 `curl` 有响应，说明服务启动成功！
 
 ### 第7步：配置阿里云安全组（重要！）
 
-阿里百炼需要从公网访问你的服务，必须在安全组中放行 8000 端口：
+阿里百炼需要从公网访问你的服务，必须在安全组中放行 **8890** 端口：
 
 1. 登录 [阿里云控制台](https://ecs.console.aliyun.com/)
 2. 进入 **云服务器 ECS** → 找到你的实例
@@ -172,7 +177,7 @@ curl -N http://localhost:8000/sse
 | 规则方向 | 入方向 |
 | 授权策略 | 允许 |
 | 协议类型 | TCP |
-| 端口范围 | 8000/8000 |
+| 端口范围 | 8890/8890 |
 | 授权对象 | 0.0.0.0/0 |
 | 描述 | MCP服务端口 |
 
@@ -185,7 +190,7 @@ curl -N http://localhost:8000/sse
 在你**本地电脑**的浏览器中访问：
 
 ```
-http://<你的服务器公网IP>:8000/sse
+http://<你的服务器公网IP>:8890/sse
 ```
 
 > ✅ 如果浏览器开始持续加载（SSE 是长连接，不会立刻返回完整页面），说明公网访问正常！
@@ -239,11 +244,11 @@ pip install -e .
 ### 第5步：测试运行
 
 ```bash
-# 先前台运行，确认没问题
-daily-fortune-mcp --transport sse --host 0.0.0.0 --port 8000
+# 先前台运行，确认没问题（注意这里用的是 8890 端口）
+daily-fortune-mcp --transport sse --host 0.0.0.0 --port 8890
 ```
 
-> ✅ 看到类似 `Uvicorn running on http://0.0.0.0:8000` 的输出就对了。
+> ✅ 看到类似 `Uvicorn running on http://0.0.0.0:8890` 的输出就对了。
 > 按 `Ctrl+C` 停掉，接下来配置后台运行。
 
 ### 第6步：配置 systemd 守护进程（让服务自动运行）
@@ -259,7 +264,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/opt/daily_fortune
-ExecStart=/opt/daily_fortune/venv/bin/daily-fortune-mcp --transport sse --host 0.0.0.0 --port 8000
+ExecStart=/opt/daily_fortune/venv/bin/daily-fortune-mcp --transport sse --host 0.0.0.0 --port 8890
 Restart=always
 RestartSec=5
 
@@ -296,7 +301,7 @@ sudo systemctl stop daily-fortune-mcp
 
 ### 第7步：配置安全组
 
-同方案一第7步。
+同方案一第7步（放行 8890 端口）。
 
 ---
 
@@ -317,7 +322,7 @@ server {
     server_name fortune.yourdomain.com;  # 替换成你的域名
 
     location / {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:8890;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_set_header Host $host;
@@ -362,40 +367,27 @@ sudo systemctl enable certbot.timer
 
 ## ☁️ 阿里百炼平台接入
 
-服务部署好以后，去阿里百炼平台配置 MCP 工具：
+> 📘 **详细的百炼接入教程请查看：[BAILIAN.md](./BAILIAN.md)**
+>
+> 包含脚本部署方式、AI网关方式、JSON配置模板、智能体提示词、常见问题等。
 
-### 步骤：
+**快速要点：**
 
-1. 登录 [阿里百炼平台](https://bailian.console.aliyun.com/)
-2. 进入你的**智能体应用** → **工具/MCP** 配置页面
-3. 点击 **添加 MCP 服务** / **添加工具**
-4. 选择 **SSE** 传输协议
-5. 填写服务地址：
-
-| 场景 | MCP 地址 |
-|------|---------|
-| 没有 Nginx/域名 | `http://<你的服务器公网IP>:8000/sse` |
-| 有 Nginx 但没 HTTPS | `http://fortune.yourdomain.com/sse` |
-| 有 Nginx + HTTPS | `https://fortune.yourdomain.com/sse` |
-
-6. 点击**测试连接**，确认能连通
-7. 保存配置
-
-> 💡 阿里百炼会自动发现 MCP 服务提供的 3 个工具：
-> - `calculate_fortune`（计算气运值）
-> - `get_wuxing_info`（查询五行信息）
-> - `get_ganzhi_info`（查询天干地支信息）
-
-### 智能体 Prompt 参考
-
-在你的智能体系统提示中，可以加入类似这样的话：
-
+1. 百炼 MCP 管理 → 点击「+」→ 选择 **「使用脚本部署」**
+2. 安装方式选 **http**（远程服务）
+3. MCP 配置 JSON：
+```json
+{
+  "mcpServers": {
+    "daily-fortune": {
+      "url": "http://<你的服务器公网IP>:8890/sse",
+      "type": "sse"
+    }
+  }
+}
 ```
-你是一个气运大师，可以根据用户的出生日期计算每日气运值。
-当用户询问今日运势时，请调用 calculate_fortune 工具，
-传入用户的出生日期（格式 YYYY-MM-DD），如果有出生时间也一并提供。
-根据返回的结果，用生动有趣的方式解读气运分数、简评和开运建议。
-```
+4. 部署后创建智能体，**必须选 Plus 模型**（Max 不支持 MCP）
+5. 在智能体中勾选该 MCP 服务即可
 
 ---
 
@@ -417,7 +409,7 @@ sudo docker rm -f daily-fortune-mcp
 sudo docker run -d \
   --name daily-fortune-mcp \
   --restart=always \
-  -p 8000:8000 \
+  -p 8890:8000 \
   daily-fortune-mcp:latest
 ```
 
@@ -451,19 +443,20 @@ sudo docker logs daily-fortune-mcp
 
 # 常见原因：端口被占用
 # 检查端口占用
-sudo lsof -i :8000
+sudo lsof -i :8890
 # 杀掉占用进程或换个端口
+sudo docker rm -f daily-fortune-mcp
 sudo docker run -d --name daily-fortune-mcp --restart=always -p 9000:8000 daily-fortune-mcp:latest
 ```
 
 ### 问题2：本地能访问但公网访问不了
 
-1. **检查安全组**：确保 8000 端口已放行（见第7步）
+1. **检查安全组**：确保 **8890** 端口已放行（见第7步）
 2. **检查防火墙**：
    ```bash
    sudo ufw status
    # 如果开启了防火墙，需要放行端口：
-   sudo ufw allow 8000/tcp
+   sudo ufw allow 8890/tcp
    ```
 3. **检查容器状态**：`sudo docker ps` 确认容器在运行
 
@@ -476,7 +469,7 @@ sudo docker run -d --name daily-fortune-mcp --restart=always -p 9000:8000 daily-
 
 ### 问题4：阿里百炼连不上 MCP
 
-1. 先在你本地浏览器测试 `http://<公网IP>:8000/sse` 是否能访问
+1. 先在你本地浏览器测试 `http://<公网IP>:8890/sse` 是否能访问
 2. 确认填写的地址末尾有 `/sse`
 3. 如果是 HTTPS，确保证书有效（`certbot` 自动申请的证书有效）
 

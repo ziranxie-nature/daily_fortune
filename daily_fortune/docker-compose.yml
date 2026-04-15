@@ -6,7 +6,7 @@ services:
     container_name: daily-fortune-mcp
     restart: always
     ports:
-      - "8000:8000"
+      - "8890:8000"
     environment:
       - TZ=Asia/Shanghai
     healthcheck:

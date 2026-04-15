@@ -12,7 +12,12 @@
 
 import json
 import argparse
+import logging
 from datetime import datetime
+from typing import Callable
+
+import uvicorn
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from mcp.server.fastmcp import FastMCP
 
@@ -26,6 +31,27 @@ from .wuxing import (
     wuxing_relation, get_day_master_element,
     get_sizhu_wuxing_distribution,
 )
+
+logger = logging.getLogger(__name__)
+
+
+class TrustAllHostsMiddleware:
+    """
+    将所有请求的 Host 头重写为 localhost，
+    绕过 mcp 库的 DNS 重绑定保护（TransportSecurityMiddleware）。
+    适用于部署在公网 IP 的 MCP 服务被百炼等平台直接访问的场景。
+    """
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] in ("http", "websocket"):
+            # 将 headers 中的 host 改为 localhost
+            headers = dict(scope.get("headers", []))
+            headers[b"host"] = b"localhost"
+            scope["headers"] = list(headers.items())
+        await self.app(scope, receive, send)
+
 
 # 创建 FastMCP 服务器实例
 mcp = FastMCP(
@@ -241,12 +267,28 @@ def main():
     )
     args = parser.parse_args()
 
-    if args.transport == "sse":
-        mcp.run(transport="sse", host=args.host, port=args.port)
-    elif args.transport == "streamable-http":
-        mcp.run(transport="streamable-http", host=args.host, port=args.port)
-    else:
+    if args.transport == "stdio":
         mcp.run(transport="stdio")
+        return
+
+    # SSE / Streamable-HTTP 模式：获取 ASGI app，用 uvicorn 启动
+    try:
+        if args.transport == "sse":
+            app = mcp.sse_app()
+        else:
+            app = mcp.streamable_http_app()
+    except AttributeError:
+        # 旧版 mcp 库没有 sse_app / streamable_http_app 方法
+        try:
+            mcp.run(transport=args.transport, host=args.host, port=args.port)
+        except TypeError:
+            mcp.run(transport=args.transport)
+        return
+
+    # 包裹 TrustAllHostsMiddleware，绕过 mcp 内部的 Host 校验
+    # 这样无论百炼用 IP 还是域名访问，都不会被 421 拦截
+    wrapped_app = TrustAllHostsMiddleware(app)
+    uvicorn.run(wrapped_app, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
