@@ -1,0 +1,16 @@
+version: "3.8"
+
+services:
+  daily-fortune-mcp:
+    build: .
+    container_name: daily-fortune-mcp
+    restart: always
+    ports:
+      - "8890:8000"
+    environment:
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/sse', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
